@@ -1,0 +1,734 @@
+---
+title: 'Stat 490 Final Project: Predicting House Prices'
+author: "Your Name"
+date: "Presentation and Paper: Aug 2, 2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Important Dates
+
+* Tuesday, Aug 31: Email me an annotated R (or R Markdown) output on which your report will be based along with a few paragraphs describing your results. If you have any issues about what you should do, write them down for me and I will discuss them with you.
+
+* Thursday, Aug 2: Project Presentation 
+
+### Project Description
+
+The final report for the project should be a 3-5 page paper that describes the questions of interest, how you used the method with details on the steps you used in your analysis, your findings about your question of interest and the limitations of your study. Specifically, your report should contain the following: 
+
+1. Abstract: A one paragraph summary of what you set out to learn, and what you ended up finding. It should summarize the entire report. 
+
+2. Introduction: A brief description of the data set, variables, etc. Desribe also the main prediction problem and which variables do you initially suspect will be associated with the response.
+
+3. Analysis: Describe the necessary steps taken to implement procedure. Be catalog what you have seen in your exploratory data analysis.
+
+4. Results: Provide inferences about the questions of interest and discussion. 
+
+5. Limitations of study and conclusion: Describe any limitations of your study and how they might be overcome and provide brief conclusions about the results of your study. 
+
+### Project Presentation
+
+Prepare a 10-15 minutes worth of presentation slides which contains significant portions of your project.
+
+
+### Seatle Housing Data Set
+
+a) This dataset contains house sale prices for King County, which includes Seattle. It includes homes sold between May 2014 and May 2015. The main variable of interest is the quntitative variable `price` at which the house was sold. Use the techniques you have learned in the class to construct several models predicting housing `price` using the predictors found in the data set. The original data `kc_house_data.csv` contains 21,613 rows and 21 columns. The variables in the data set are the following: 
+
+* id - Unique ID for each home sold 
+* date - Date of the home sale 
+* price - Price of each home sold 
+* bedrooms - Number of bedrooms 
+* bathrooms - Number of bathrooms, where .5 accounts for a room with a toilet but no shower 
+* sqft_living - Square footage of the apartments interior living space 
+* sqft_lot - Square footage of the land space 
+* floors - Number of floors 
+* waterfront - A dummy variable for whether the apartment was overlooking the waterfront or not 1’s represent a waterfront property, 0’s represent a non-waterfront property 
+* view - An index from 0 to 4 of how good the view of the property was, 0 - lowest, 4 - highest 
+* condition - An index from 1 to 5 on the condition of the apartment, 1 - lowest, 4 - highest 
+* grade - An index from 1 to 13, where 1-3 falls short of building construction and design, 7 has an average level of construction and design, and 11-13 have a high quality level of construction and design. 
+* sqft_above - The square footage of the interior housing space that is above ground level 
+* sqft_basement - The square footage of the interior housing space that is below ground level 
+* yr_built - The year the house was initially built 
+* yr_renovated - The year of the house’s last renovation 
+* zipcode - What zipcode area the house is in 
+* lat - Lattitude 
+* long - Longitude 
+* sqft_living15 - The square footage of interior housing living space for the nearest 15 neighbors 
+* sqft_lot15 - The square footage of the land lots of the nearest 15 neighbors
+
+b) Be careful with the two natural categorical variables in the data: `id` (numeric when you first load the data) and `date`. You may delete these two variables but note that these may be useful depending on the progress of your modelling (for example when you want to identify influential observations or when you want to see date of purchase or compute the average sales for a given period of time).
+
+c) Explore your data by computing summary measures and visualize the relationships. You may also create or combine new variables that you think is necessary. For example, you can create a variable called `bed_bath_ratio` which is the quotient of variables `bedrooms` and `bathrooms`. Check also the range of values in your variables. Often, when a certain predictor has wide range you might need to do transformation on this predictor (such as `log` or `sqrt`) to avoid high leverage (large x values) points in your model.
+
+
+d) After you have explored your data and pre-processed your predictor variables. Fit several models (linear regression, knn, regression tree, and random forest) and perform variable selection (selection methods, regularization) using the training data. When you fit the model use cross-validation technique especially when using the `train` function in the package `caret`. Check the performance (RMSE) of your models on the test data.
+
+
+### Loading the data, Separate Training data and Validation Test data
+
+```{r}
+# download the data set from Blackboard
+house_data <- read.csv("kc_house_data.csv", header = T)
+dim(house_data)
+# house_data$id <- NULL  # delete ID
+# house_data$date <- NULL  # delete date
+# separate training and testing data
+set.seed(2018)
+indx <- sample(nrow(house_data), size = 0.7*nrow(house_data))
+house_train <- house_data[indx, ]  # training data
+dim(house_train)
+house_test <- house_data[-indx, ]  # testing data
+dim(house_test)
+```
+
+#Necessary Libraries
+
+```{r}
+library(pander)
+library(tidyr)
+library(broom)
+library(lmSupport)
+library(caret)
+library(leaps)
+library(elasticnet)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(class)
+library(car)
+library(VIF)
+```
+
+#Loading the Dataset
+```{r}
+house <- read.csv("kc_house_data.csv", header = T)
+house2 <- read.csv("kc_house_data.csv", header = T) #Extra dataset
+dim(house)
+set.seed(2018)
+```
+
+
+#Creating scatterplots for each predictor to visualize relationship
+```{r}
+for(i in 1:20){
+  housefit <- lm(price ~ house[,i], data = house)
+  plot(price ~ house[,i], data = house)
+  abline(housefit, col = 'red')
+}
+```
+
+#Adjusting the Dataset
+
+```{r}
+house$id <- NULL
+house <- house[-c(15871),] #Typo for bathrooms at this data point
+house$yr_built <- as.numeric(substr(house$date, start = 1, stop = 4)) - house$yr_built
+house$yr_renovated <- ifelse(house$yr_renovated == 0,
+                             house$yr_built,
+                             as.numeric(substr(house$date, start = 1, stop = 4)) - house$yr_renovated)
+house$bed_bath_ratio <- ifelse(house$bathrooms == 0,
+                               house$bedrooms,
+                               house$bedrooms / house$bathrooms)
+house$sqft_lot <- 1/(house$sqft_lot) #1/X transformation on sqft_lot
+house$sqft_lot15 <- 1/(house$sqft_lot15) #1/X transformation on sqt_lot15
+  #Changing lat and long to dummy variables
+house$long <- ifelse(house$long <= -122.1, 1, 0)
+house$lat <- ifelse(house$lat >= 47.5, 1, 0)
+
+summary(house)
+```
+
+
+#Adjusting Extra Dataset
+
+```{r}
+house2 <- house[-c(15871),] #Typo for bathrooms at this data point
+house2$yr_built <- as.numeric(substr(house2$date, start = 1, stop = 4)) - house2$yr_built
+house2$yr_renovated <- ifelse(house2$yr_renovated == 0,
+                             house2$yr_built,
+                             as.numeric(substr(house2$date, start = 1, stop = 4)) - house2$yr_renovated)
+house2$bed_bath_ratio <- ifelse(house2$bathrooms == 0,
+                               house2$bedrooms,
+                               house2$bedrooms / house2$bathrooms)
+house2$sqft_lot <- 1/(house2$sqft_lot) #1/X transformation on sqft_lot
+house2$sqft_lot15 <- 1/(house2$sqft_lot15) #1/X transformation on sqt_lot15
+  #Changing lat and long to dummy variables
+house2$long <- ifelse(house2$long <= -122.1, 1, 0)
+house2$lat <- ifelse(house2$lat >= 47.5, 1, 0)
+
+house2$date <- NULL
+house2$id <- NULL
+house2$zipcode <- NULL
+
+```
+
+
+#Creating Training and Testing Data for Both Datasets
+
+```{r}
+index <- sample(nrow(house), size = 0.7*nrow(house))
+house.train <- house[index, ] #training data
+dim(house.train)
+house.test <- house[-index, ] #test data
+dim(house.test)
+
+index2 <- sample(nrow(house2), size = 0.7*nrow(house2))
+house2.train <- house2[index2, ]
+house2.test <- house[-index2, ]
+
+```
+
+#Initial Fit with All Predictors
+
+```{r}
+house.fitall <- lm(price ~ bedrooms + bathrooms + bed_bath_ratio + sqft_living +
+                   sqft_lot + floors + waterfront + view + condition + grade +
+                   yr_built + yr_renovated + lat + sqft_above + sqft_basement + 
+                   long + sqft_living15 + sqft_lot15, data = house.train)
+summary(house.fitall)
+
+```
+
+#Assessing Multicollinearity
+
+```{r}
+vif(house.fitall)
+alias(house.fitall)
+#Figured out sqft_living and sqft_above are linearly dependent
+
+#Assessing multicollinearity between sqft_living and sqft_above
+house.fit.sqlivingabove <- lm(sqft_living ~ sqft_above, data = house)
+summary(house.fit.sqlivingabove)
+plot(sqft_above ~ sqft_living, data = house, xlab = "sqftliving", ylab = "sqftabove")
+abline(house.fit.sqlivingabove, col = 'red')
+
+```
+
+#Ridge Regression and LASSO on initial dataset to see which of sqft_above and sqft_living should be eliminated
+
+```{r}
+#Ridge Regression
+house.trainControl <- trainControl(method = "cv", number = 5)
+ridge.house <- train(price ~.,
+                     data = house2.train,
+                     method = 'ridge',
+                     tuneLength = 20,
+                     trControl = house.trainControl,
+                     preProcess = c('center', 'scale'))
+
+ridge.house
+ridge.house$bestTune
+ridge.house$finalModel$beta.pure
+plot.enet(ridge.house$finalModel,
+          xvar="penalty", use.color = TRUE)
+
+#LASSO
+house.trainControl.lasso <- trainControl(method = 'cv', number = 5)
+lasso.house <- train(price ~ .,
+                     data = house2.train,
+                     method = 'lasso',
+                     tuneLength = 20,
+                     trControl = house.trainControl.lasso,
+                     preProcess = c('center', 'scale'))
+lasso.house
+lasso.house$bestTune
+lasso.house$finalModel$beta.pure
+plot.enet(lasso.house$finalModel,
+          xvar = "penalty", use.color = TRUE)
+
+#Based on linear dependency between sqft_living and sqft_above,
+#sqft_above shown to be less significant through ridge regression
+#and LASSO ,so this and 
+#sqft_basement were removed from the initial model, as 
+#sqft_living accounts for both of these
+```
+
+#Feature Selection first using all variables
+
+```{r}
+#Best subset selection
+house.regbs.out <- 
+  regsubsets(price ~ bedrooms + bathrooms + bed_bath_ratio + sqft_living +
+               sqft_lot + floors + waterfront + view + condition + grade +
+               yr_built + yr_renovated + lat +
+               long + sqft_living15 + sqft_lot15 + 
+               sqft_above + sqft_basement, 
+             data = house.train,
+             nbest = 1, nvmax = NULL,
+             method = "exhaustive")
+house.regbs.sum <- summary(house.regbs.out)
+data.frame(p = 1:17, adj.R2 = house.regbs.sum$adjr2,
+           Cp = house.regbs.sum$cp, BIC = house.regbs.sum$bic)
+which.max(house.regbs.sum$adjr2)
+which.min(house.regbs.sum$cp)
+which.min(house.regbs.sum$bic)
+data.frame(adj.R2 = house.regbs.sum$which[14,],
+           Cp = house.regbs.sum$which[14,],
+           BIC = house.regbs.sum$which[14,])
+
+house.regbs.sum$outmat
+
+#Forward selection
+house.regforw.out <- 
+  regsubsets(price ~ bedrooms + bathrooms + bed_bath_ratio + sqft_living +
+               sqft_lot + floors + waterfront + view + condition + grade +
+               yr_built + yr_renovated + lat + 
+               long + sqft_living15 + sqft_lot15  + 
+               sqft_above + sqft_basement, 
+             data = house.train,
+             nbest = 1, nvmax = NULL,
+             method = "forward")
+house.regforw.sum <- summary(house.regforw.out)
+data.frame(p = 1:17, adj.R2 = house.regforw.sum$adjr2,
+           Cp = house.regforw.sum$cp, BIC = house.regforw.sum$bic)
+which.max(house.regforw.sum$adjr2)
+which.min(house.regforw.sum$cp)
+which.min(house.regforw.sum$bic)
+data.frame(adj.R2 = house.regforw.sum$which[14,],
+           Cp = house.regforw.sum$which[14,],
+           BIC = house.regforw.sum$which[14,])
+
+house.regforw.sum$outmat
+
+#Backward selection
+house.regback.out <- 
+  regsubsets(price ~ bedrooms + bathrooms + bed_bath_ratio + sqft_living +
+               sqft_lot + floors + waterfront + view + condition + grade +
+               yr_built + yr_renovated + lat +
+               long + sqft_living15 + sqft_lot15 + 
+               sqft_above + sqft_basement, 
+             data = house.train,
+             nbest = 1, nvmax = NULL,
+             method = "backward")
+house.regback.sum <- summary(house.regback.out)
+data.frame(p = 1:17, adj.R2 = house.regback.sum$adjr2,
+           Cp = house.regback.sum$cp, BIC = house.regback.sum$bic)
+which.max(house.regback.sum$adjr2)
+which.min(house.regback.sum$cp)
+which.min(house.regback.sum$bic)
+data.frame(adj.R2 = house.regback.sum$which[14,],
+           Cp = house.regback.sum$which[14,],
+           BIC = house.regback.sum$which[14,])
+
+house.regback.sum$outmat
+
+data.frame(best.subset = house.regbs.sum$which[14,],
+           forward = house.regforw.sum$which[14,],
+           backward = house.regforw.sum$which[14,])
+
+#Based on linear dependency between sqft_living and sqft_above,
+#sqft_above shown to be less significant through feature selection
+#so this and 
+#sqft_basement were removed from the initial model, as 
+#sqft_living accounts for both of these
+```
+
+#Eliminating sqft_above and sqft_basement
+
+```{r}
+house2.train$sqft_above <- NULL
+house2.train$sqft_basement <- NULL
+```
+
+#Ridge Regression and LASSO on adjusted dataset to see which if any other variables should be eliminated
+
+```{r}
+#Ridge Regression
+house.trainControl <- trainControl(method = "cv", number = 5)
+ridge.house <- train(price ~.,
+                     data = house2.train,
+                     method = 'ridge',
+                     tuneLength = 20,
+                     trControl = house.trainControl,
+                     preProcess = c('center', 'scale'))
+
+ridge.house
+ridge.house$bestTune
+ridge.house$finalModel$beta.pure
+plot.enet(ridge.house$finalModel,
+          xvar="penalty", use.color = TRUE)
+
+#LASSO
+house.trainControl.lasso <- trainControl(method = 'cv', number = 5)
+lasso.house <- train(price ~ .,
+                     data = house2.train,
+                     method = 'lasso',
+                     tuneLength = 20,
+                     trControl = house.trainControl.lasso,
+                     preProcess = c('center', 'scale'))
+lasso.house
+lasso.house$bestTune
+lasso.house$finalModel$beta.pure
+plot.enet(lasso.house$finalModel,
+          xvar = "penalty", use.color = TRUE)
+```
+
+#Feature Selection first using all variables
+
+```{r}
+#Best subset selection
+house.regbs.out <- 
+  regsubsets(price ~ bedrooms + bathrooms + bed_bath_ratio + sqft_living +
+               sqft_lot + floors + waterfront + view + condition + grade +
+               yr_built + yr_renovated + lat +
+               long + sqft_living15 + sqft_lot15, 
+             data = house.train,
+             nbest = 1, nvmax = NULL,
+             method = "exhaustive")
+house.regbs.sum <- summary(house.regbs.out)
+data.frame(p = 1:17, adj.R2 = house.regbs.sum$adjr2,
+           Cp = house.regbs.sum$cp, BIC = house.regbs.sum$bic)
+which.max(house.regbs.sum$adjr2)
+which.min(house.regbs.sum$cp)
+which.min(house.regbs.sum$bic)
+data.frame(adj.R2 = house.regbs.sum$which[14,],
+           Cp = house.regbs.sum$which[14,],
+           BIC = house.regbs.sum$which[14,])
+
+house.regbs.sum$outmat
+
+#Forward selection
+house.regforw.out <- 
+  regsubsets(price ~ bedrooms + bathrooms + bed_bath_ratio + sqft_living +
+               sqft_lot + floors + waterfront + view + condition + grade +
+               yr_built + yr_renovated + lat + 
+               long + sqft_living15 + sqft_lot15, 
+             data = house.train,
+             nbest = 1, nvmax = NULL,
+             method = "forward")
+house.regforw.sum <- summary(house.regforw.out)
+data.frame(p = 1:17, adj.R2 = house.regforw.sum$adjr2,
+           Cp = house.regforw.sum$cp, BIC = house.regforw.sum$bic)
+which.max(house.regforw.sum$adjr2)
+which.min(house.regforw.sum$cp)
+which.min(house.regforw.sum$bic)
+data.frame(adj.R2 = house.regforw.sum$which[14,],
+           Cp = house.regforw.sum$which[14,],
+           BIC = house.regforw.sum$which[14,])
+
+house.regforw.sum$outmat
+
+#Backward selection
+house.regback.out <- 
+  regsubsets(price ~ bedrooms + bathrooms + bed_bath_ratio + sqft_living +
+               sqft_lot + floors + waterfront + view + condition + grade +
+               yr_built + yr_renovated + lat +
+               long + sqft_living15 + sqft_lot15, 
+             data = house.train,
+             nbest = 1, nvmax = NULL,
+             method = "backward")
+house.regback.sum <- summary(house.regback.out)
+data.frame(p = 1:17, adj.R2 = house.regback.sum$adjr2,
+           Cp = house.regback.sum$cp, BIC = house.regback.sum$bic)
+which.max(house.regback.sum$adjr2)
+which.min(house.regback.sum$cp)
+which.min(house.regback.sum$bic)
+data.frame(adj.R2 = house.regback.sum$which[14,],
+           Cp = house.regback.sum$which[14,],
+           BIC = house.regback.sum$which[14,])
+
+house.regback.sum$outmat
+
+data.frame(best.subset = house.regbs.sum$which[14,],
+           forward = house.regforw.sum$which[14,],
+           backward = house.regforw.sum$which[14,])
+
+#After running ridge/LASSO/feature selection w/out sqft_above and 
+#sqft_basement, decided predictors floors, sqft_lot15, and yr_renovated
+#are out. First two because of feature selection (only two out 
+#because of BIC, last one because it was the first one eliminated
+#in ridge/LASSO methods, and would have been next predictor out
+#with feature selection.
+```
+
+#Eliminating floors, sqft_lot15, and yr_renovated
+
+```{r}
+house2.train$floors <- NULL
+house2.train$sqft_lot15 <- NULL
+house2.train$yr_renovated <- NULL
+```
+
+#Model after running ridge regression/LASSO/feature selection
+
+```{r}
+house.fitadj <- lm(price ~ bedrooms + bathrooms + bed_bath_ratio +
+     sqft_living + sqft_lot + waterfront + view + condition + grade +
+     yr_built + lat + long + sqft_living15, data = house.train)
+summary(house.fitadj)
+vif(house.fitadj)
+plot(house.fitadj)
+plot(house.fitadj, plot = "5")
+
+#Negligible test MSE increase - adds validity to model
+```
+
+#Eliminating variables in main dataset for regression trees/ tree pruning
+
+```{r}
+house$sqft_above <- NULL
+house$sqft_basement <- NULL
+house$floors <- NULL
+house$sqft_lot15 <- NULL
+house$yr_renovated <- NULL
+house.train$date <- NULL
+house.train$zipcode <- NULL
+house.train$sqft_above <- NULL
+house.train$sqft_basement <- NULL
+house.train$floors <- NULL
+house.train$sqft_lot15 <- NULL
+house.train$yr_renovated <- NULL
+```
+
+###Regression Trees###
+
+#Initial regression trees/tree pruning
+```{r}
+house.fit.tree <- rpart(price ~ ., data = house.train)
+house.fit.tree
+prp(house.fit.tree)
+```
+
+#Prediction on the training and testing data
+
+```{r}
+yhat.train <- predict(house.fit.tree)
+yhat.test <- predict(house.fit.tree, newdata = house.test)
+#Test MSE
+(test.rmse <- sqrt(mean((house.test$price - yhat.test)^2)))
+#test.mse <- mean((Credit[-train,]$Balance - yhat.test)^2)
+```
+
+
+#Regression Tree Performance on 5-fold CV Data Partition
+```{r}
+#Creating indices for 5-fold CV
+house.flds <- caret::createFolds(1:nrow(house), k = 5,
+                           list = TRUE, returnTrain = TRUE)
+house.cv.rmse <- rep(NA,5)
+for(i in 1:5){
+  #use training indices generated above
+  house.fit.cv <- rpart(price~., data = house, subset = house.flds[[i]])
+  #predict responses in test data
+  yhat.t <- predict(house.fit.cv, newdata = house[-house.flds[[i]],])
+  house.cv.rmse[i] <- sqrt(mean((house[-house.flds[[i]],]$price - yhat.t)^2))
+}
+
+summary(house.cv.rmse)
+printcp(house.fit.tree)
+#CV training RMSE
+sqrt(1.3359e+11 * .32345)
+
+#CV test RMSE
+sqrt(1.3359e+11 * .35364)
+
+#Display just error tables
+house.fit.tree$cptable
+
+#check which tree size satisfies 'xerror < lowxerror + lowxstd'
+which.min(house.fit.tree$cptable[,4])
+house.fit.tree$cptable[,4] < house.fit.tree$cptable[10,4] + house.fit.tree$cptable[10,5]
+```
+
+
+#Tree Pruning
+```{r}
+data.frame(CP = house.fit.tree$cptable[,1],
+           xerror = house.fit.tree$cptable[,4],
+           x.error.std = house.fit.tree$cptable[,4] + house.fit.tree$cptable[,5])
+
+#Estimated cv error
+sqrt(214736 * .1725058)
+```
+
+
+#Plot of CV training error
+```{r}
+plotcp(house.fit.tree, cex.lab = 0.75, cex.axis = 0.75)
+#Pruned tree, cp is complex parameter
+(house.fit.tree1 <- prune(house.fit.tree, cp = 0.014))
+#To ensure we get tree 10, the CP value we give to the
+#pruning algorithm is the geometric midpoint of CP values
+#for tree 10 and tree 9
+(cp.opt <- sqrt(house.fit.tree$cptable[8,1] * house.fit.tree$cptable[9,1]))
+(house.fit.tree2 <- prune(house.fit.tree, cp = cp.opt))
+```
+
+#Plot Trees
+```{r}
+par(mfcol = c(1,3))
+prp(house.fit.tree)
+prp(house.fit.tree1)
+prp(house.fit.tree2)
+```
+
+#Prediction on Testing Data
+```{r}
+yh0 <- predict(house.fit.tree, house.test)
+yh1 <- predict(house.fit.tree1, house.test)
+yh2 <- predict(house.fit.tree2, house.test)
+#Test RMSE
+data.frame(
+  cp0.01 = sqrt(mean((house.test$price - yh0)^2)),
+  cp0.02 = sqrt(mean((house.test$price - yh1)^2)),
+  cp.opt = sqrt(mean((house.test$price - yh2)^2))
+)
+```
+
+
+#Fit tree models on 5-fold CV test data sets
+```{r}
+#Creating indices for 5-fold CV
+house.flds2 <- caret::createFolds(1:nrow(house), k = 5,
+                            list = TRUE, returnTrain = TRUE)
+house.varp <- function(x) mean((x-mean(x))^2) #Compute total error
+house.rmse.cv <- matrix(NA, nrow = 4, ncol = 5)
+for(i in 1:5){
+  tr.cv <- house.flds2[[i]]
+  fit.cv2 <- rpart(price~., data = house, subset = tr.cv)
+  yh0 <- predict(fit.cv2, house[-tr.cv,])
+  yh1 <- predict(prune(fit.cv2, cp = 0.013), house[-tr.cv,])
+  yh2 <- predict(prune(fit.cv2, cp = cp.opt), house[-tr.cv,])
+  yhat.t <- predict(fit.cv2, newdata = house[-house.flds[[i]],])
+  house.rmse.cv[,i] <- c(
+    fit.cv2$cptable[5,"xerror"] * house.varp(house[tr.cv,]$price),
+    sqrt(mean((house[-tr.cv,]$price - yh0)^2)),
+    sqrt(mean((house[-tr.cv,]$price - yh1)^2)),
+    sqrt(mean((house[-tr.cv,]$price - yh2)^2)))
+}
+rownames(house.rmse.cv) <- c("house.cv.mse", "tmse-cp0.01",
+                      "tmse-cp0.02", "tmse-cp.opt")
+house.rmse.cv
+apply(house.rmse.cv, 1, mean)
+```
+
+
+###Random FOrests###
+
+#Get trees in each forest (number of predictors selected at each node varies from 2 to 5)
+```{r}
+house.fit.rf2 <- randomForest(price~., data = house.train,
+                             mtry = 2,
+                             ntree = 150,
+                             importance = TRUE)
+house.fit.rf3 <- randomForest(price~., data = house.train,
+                              mtry = 3,
+                              ntree = 150,
+                              importance = TRUE)
+house.fit.rf4 <- randomForest(price~., data = house.train,
+                              mtry = 4,
+                              ntree = 150,
+                              importance = TRUE)
+house.fit.rf5 <- randomForest(price~., data = house.train,
+                              mtry = 5,
+                              ntree = 150,
+                              importance = TRUE)
+```
+
+#Out of Bag Test MSE
+```{r}
+par(mfcol = c(1,1))
+plot(house.fit.rf3, main = "Out of Bag Test MSE")
+```
+
+
+#Print results
+```{r}
+print(house.fit.rf2)
+importance(house.fit.rf2)
+varImpPlot(house.fit.rf2, main = "")
+
+print(house.fit.rf3)
+importance(house.fit.rf3)
+varImpPlot(house.fit.rf3, main = "")
+
+print(house.fit.rf4)
+importance(house.fit.rf4)
+varImpPlot(house.fit.rf4, main = "")
+
+print(house.fit.rf5)
+importance(house.fit.rf5)
+varImpPlot(house.fit.rf5, main = "")
+
+yh.rf2 <- predict(house.fit.rf2, newdata = house.test)
+yh.rf3 <- predict(house.fit.rf3, newdata = house.test)
+yh.rf4 <- predict(house.fit.rf4, newdata = house.test)
+yh.rf5 <- predict(house.fit.rf5, newdata = house.test)
+
+#Test RMSE's for random forests
+data.frame(
+  rf.mse2 = sqrt(mean((house.test$price - yh.rf2)^2)),
+  rf.mse3 = sqrt(mean((house.test$price - yh.rf3)^2)),
+  rf.mse4 = sqrt(mean((house.test$price - yh.rf4)^2)),
+  rf.mse5 = sqrt(mean((house.test$price - yh.rf5)^2))
+)
+
+#Test RMSE tanks like a rock with regression trees
+#Importance difference between bathrooms, bedrooms, bed_bath_ratio
+#negligible - not removing any of these based off of this
+```
+
+###Ridge Regression/LASSO one more time to try to eliminate bed/bath predictors
+
+```{r}
+#Ridge Regression
+house.trainControl <- trainControl(method = "cv", number = 5)
+ridge.house <- train(price ~.,
+                     data = house2.train,
+                     method = 'ridge',
+                     tuneLength = 20,
+                     trControl = house.trainControl,
+                     preProcess = c('center', 'scale'))
+
+ridge.house
+ridge.house$bestTune
+ridge.house$finalModel$beta.pure
+plot.enet(ridge.house$finalModel,
+          xvar="penalty", use.color = TRUE)
+
+#LASSO
+house.trainControl.lasso <- trainControl(method = 'cv', number = 5)
+lasso.house <- train(price ~ .,
+                     data = house2.train,
+                     method = 'lasso',
+                     tuneLength = 20,
+                     trControl = house.trainControl.lasso,
+                     preProcess = c('center', 'scale'))
+lasso.house
+lasso.house$bestTune
+lasso.house$finalModel$beta.pure
+plot.enet(lasso.house$finalModel,
+          xvar = "penalty", use.color = TRUE)
+
+#
+```
+
+###Final Model###
+```{r}
+house.fitfinal <- lm(price ~ bed_bath_ratio + sqft_living +
+                     waterfront + view + condition + grade +
+                     yr_built + lat + long + sqft_living15, data = house.train)
+summary(house.fitfinal)
+vif(house.fitfinal)
+```
+
+
+###Calculating test MSE for each model###
+```{r}
+house.predfitall <- predict(house.fitall, newdata = house.test)
+house.all.rmse <- sqrt(mean((house.test$price - house.predfitall)^2))
+
+house.predfitadj <- predict(house.fitadj, newdata = house.test)
+house.adj.rmse <- sqrt(mean((house.test$price - house.predfitadj)^2))
+
+house.predfitfinal <- predict(house.fitfinal, newdata = house.test)
+house.final.rmse <- sqrt(mean((house.test$price - house.predfitfinal)^2))
+
+house.all.rmse
+house.adj.rmse
+house.final.rmse
+```
