@@ -1,5 +1,5 @@
 STAT-490-Final- 
-This is a project that I did as the final project requirement for my STAT 490 class at SIUE, which dealt with predictive analysis, big data, and machine learning.
+This is a project that I did as the final project requirement for my STAT 490 class at SIUE, which dealt with predictive analysis, big data, and machine learning. Please note that the numbers given in the report are not the exact same as the numbers in the code. The numbers are not that far off, however, and the same general results hold.
 
 The STAT 490 Project file is the original code I wrote for the project.
 
